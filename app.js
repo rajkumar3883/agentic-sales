@@ -27,7 +27,68 @@ ExpressWs(app);
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
-res.send("AI Backend service is running..");
+    res.send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <meta charset="UTF-8">
+      <title>Call Phone</title>
+      <style>
+        body {
+          background-color: #f0f2f5;
+          font-family: Arial, sans-serif;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          height: 100vh;
+          margin: 0;
+        }
+        .container {
+          background: #ffffff;
+          padding: 30px 40px;
+          border-radius: 12px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+          text-align: center;
+        }
+        input[type="text"] {
+          padding: 10px;
+          width: 250px;
+          border: 1px solid #ccc;
+          border-radius: 6px;
+          margin-top: 10px;
+          margin-bottom: 20px;
+          font-size: 16px;
+        }
+        button {
+          padding: 10px 20px;
+          background-color: #4CAF50;
+          color: white;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 16px;
+        }
+        button:hover {
+          background-color: #45a049;
+        }
+        h1 {
+          margin-bottom: 20px;
+          color: #333;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="container">
+        <h1>Make a Call</h1>
+        <form action="http://localhost:3000/makecall" method="get">
+          <input type="text" id="phonenumber" name="phonenumber" placeholder="Enter phone number" required>
+          <br>
+          <button type="submit">Call</button>
+        </form>
+      </div>
+    </body>
+    </html>
+  `);
 });
 app.get('/makecall', (req, res) => {
   const queries = req.query;
