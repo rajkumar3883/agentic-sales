@@ -80,7 +80,7 @@ app.get('/', (req, res) => {
     <body>
       <div class="container">
         <h1>Make a Call</h1>
-        <form action="http://localhost:3000/makecall" method="get">
+        <form action="http://3.110.47.194/makecall" method="get">
           <input type="text" id="phonenumber" name="phonenumber" placeholder="Enter phone number" required>
           <br>
           <button type="submit">Call</button>
