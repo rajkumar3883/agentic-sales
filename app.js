@@ -15,6 +15,7 @@ const { ElevenLabsTTSService } = require('./services/tts-service');
 const { ExternalGptService } = require('./services/external-gpt-service');
 
 const { recordingService } = require('./services/recording-service');
+const { makeOutBoundCall } = require('./scripts/outbound-call.js');
 
 const VoiceResponse = require('twilio').twiml.VoiceResponse;
 
@@ -24,6 +25,16 @@ ExpressWs(app);
 
 
 const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+res.send("AI Backend service is running..");
+});
+app.get('/makecall', (req, res) => {
+  const queries = req.query;
+  const phoneNumber = queries.phonenumber;
+  makeOutBoundCall(phoneNumber)
+  res.send("call made to phoneNumber :"+phoneNumber);
+});
 
 app.post('/incoming', (req, res) => {
   console.log("landed in incoming")
@@ -73,7 +84,7 @@ app.ws('/connection', (ws) => {
         recordingService(ttsService, callSid).then(async () => {
           console.log("under ttsService then");
           console.log(`Twilio -> Starting Media Stream for ${streamSid}`.underline.red);
-          const reply ="Hello !";
+          const reply ="Hello sir ji !";
             //await getChatCompletion("") || "Hi, how can I help?";
           ttsService.generate({ partialResponseIndex: null, partialResponse: reply }, 0);
           console.log("under ttsService then after");
