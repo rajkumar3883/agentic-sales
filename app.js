@@ -4,17 +4,24 @@ require('colors');
 const express = require('express');
 const ExpressWs = require('express-ws');
 
-const { GptService } = require('./services/gpt-service');
+//const { GptService } = require('./services/gpt-service');
 const { StreamService } = require('./services/stream-service');
 const { TranscriptionService } = require('./services/transcription-service');
-const { TextToSpeechService } = require('./services/tts-service');
-const { ElevenLabsTTSService } = require('./services/elevenlabs');
+  
+const { ElevenLabsTTSService } = require('./services/tts-service');
+
+//TextToSpeechService
+//const { getChatCompletion } = require('./services/external-gpt-service');
+const { ExternalGptService } = require('./services/external-gpt-service');
+
 const { recordingService } = require('./services/recording-service');
 
 const VoiceResponse = require('twilio').twiml.VoiceResponse;
 
 const app = express();
 ExpressWs(app);
+//const ttsService = new ElevenLabsTTSService(streamService);
+
 
 const PORT = process.env.PORT || 3000;
 
@@ -41,11 +48,13 @@ app.ws('/connection', (ws) => {
     let streamSid;
     let callSid;
 
-    const gptService = new GptService();
+    //const gptService = new GptService();
+    const gptService = new ExternalGptService();
+
     const streamService = new StreamService(ws);
     const transcriptionService = new TranscriptionService();
-    const ttsService = new TextToSpeechService({});
-    const ttsServiceNew = new ElevenLabsTTSService({});
+    const ttsService = new ElevenLabsTTSService(streamService);
+    
   
     let marks = [];
     let interactionCount = 0;
@@ -58,13 +67,15 @@ app.ws('/connection', (ws) => {
         callSid = msg.start.callSid;
         
         streamService.setStreamSid(streamSid);
-        gptService.setCallSid(callSid);
+        //gptService.setCallSid(callSid);
 
         // Set RECORDING_ENABLED='true' in .env to record calls
-        recordingService(ttsService, callSid).then(() => {
+        recordingService(ttsService, callSid).then(async () => {
           console.log("under ttsService then");
           console.log(`Twilio -> Starting Media Stream for ${streamSid}`.underline.red);
-          ttsService.generate({ partialResponseIndex: null, partialResponse: 'Hello! I understand you\'re looking for a pair of AirPods, is that correct?' }, 0);
+          const reply ="Hello !";
+            //await getChatCompletion("") || "Hi, how can I help?";
+          ttsService.generate({ partialResponseIndex: null, partialResponse: reply }, 0);
           console.log("under ttsService then after");
         });
       } else if (msg.event === 'media') {
@@ -92,26 +103,31 @@ app.ws('/connection', (ws) => {
     });
   
     transcriptionService.on('transcription', async (text) => {
-      if (!text) { return; }
-      console.log(`Interaction ${interactionCount} – STT -> GPT: ${text}`.yellow);
-      gptService.completion(text, interactionCount);
-      interactionCount += 1;
-    });
-    
+       if (!text) return;
+
+    console.log(`Interaction ${gptService.interactionCount} – STT -> GPT: ${text}`.yellow);
+   await gptService.completion(text);
+   });
     gptService.on('gptreply', async (gptReply, icount) => {
-      console.log(`Interaction ${icount}: GPT -> TTS: ${gptReply.partialResponse}`.green);
-      console.log("before tts reply");
-      ttsService.generate(gptReply, icount);
-      console.log("feter tts reply");
-    });
+    console.log(`Interaction ${icount}: GPT -> TTS: ${gptReply.partialResponse}`.green);
+    await ttsService.generate(gptReply, icount);
+  });
+    // gptService.on('gptreply', async (gptReply, icount) => {
+    //   console.log(`Interaction ${icount}: GPT -> TTS: ${gptReply.partialResponse}`.green);
+    //   console.log("before tts reply");
+    //   ttsService.generate(gptReply, icount);
+    //   console.log("feter tts reply");
+    // });
   
     ttsService.on('speech', (responseIndex, audio, label, icount) => {
-      console.log(`Interaction ${icount}: TTS -> TWILIO: ${label}`.blue);
+      console.log(`Interaction ${icount}: TTS_____ -> TWILIO: ${label}`.blue);
+      console.log(`Interaction ${responseIndex}`);
   
       streamService.buffer(responseIndex, audio);
     });
   
     streamService.on('audiosent', (markLabel) => {
+      console.log("audio sntttt.......>");
       marks.push(markLabel);
     });
   } catch (err) {
