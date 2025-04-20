@@ -150,9 +150,14 @@ app.ws('/connection', (ws) => {
         recordingService(ttsService, callSid).then(async () => {
           console.log("under ttsService then");
           console.log(`Twilio -> Starting Media Stream for ${streamSid}`.underline.red);
-          const reply ="Hello sir ji !";
+          //const reply ="Hello sir ji !";
+              // 👇 INSTEAD of hardcoding reply, do:
+             const welcomeMessage = "You are now connected. Please greet the customer politely."; // your instruction to GPT
+             const reply = await gptService.completion(welcomeMessage);
+
+            console.log("First GPT reply:", gptReply.partialResponse || gptReply);
             //await getChatCompletion("") || "Hi, how can I help?";
-          ttsService.generate({ partialResponseIndex: null, partialResponse: reply }, 0);
+          ttsService.generate({ partialResponseIndex: null, partialResponse: gptReply }, 0);
           console.log("under ttsService then after");
         });
       } else if (msg.event === 'media') {
