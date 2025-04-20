@@ -31,14 +31,21 @@ const GPT_API_URL = 'http://15.207.109.182/chat';
 class ExternalGptService extends EventEmitter {
   constructor() {
     super();
+    this.sessionId = null;
     this.interactionCount = 0;
   }
-
+  registerSession(sessionId) {
+    this.sessionId = sessionId;
+    console.log(`[ExternalGptService] Registered session: ${sessionId}`);
+  }
   async completion(text) {
+     console.log(`[ExternalGptService] Session ${this.sessionId}`);
   try {
     const response = await axios.post(GPT_API_URL, {
       text,
       interactionCount: this.interactionCount,
+      session_id:this.sessionId,
+
     });
 
     if (response.data && response.data.response) {

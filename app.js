@@ -143,6 +143,7 @@ app.ws('/connection', (ws) => {
         callSid = msg.start.callSid;
         
         streamService.setStreamSid(streamSid);
+        gptService.registerSession(callSid);
         //gptService.setCallSid(callSid);
 
         // Set RECORDING_ENABLED='true' in .env to record calls
