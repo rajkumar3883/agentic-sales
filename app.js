@@ -157,7 +157,7 @@ app.ws('/connection', (ws) => {
 
             console.log("First GPT reply:", gptReply.partialResponse || gptReply);
             //await getChatCompletion("") || "Hi, how can I help?";
-          ttsService.generate({ partialResponseIndex: null, partialResponse: gptReply }, 0);
+          ttsService.generate({ partialResponseIndex: null, partialResponse: gptReply }, 1);
           console.log("under ttsService then after");
         });
       } else if (msg.event === 'media') {
