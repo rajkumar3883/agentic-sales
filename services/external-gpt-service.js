@@ -26,7 +26,7 @@
 const axios = require('axios');
 const EventEmitter = require('events');
 
-const GPT_API_URL = 'http://3.110.47.194/chat';
+const GPT_API_URL = 'http://15.207.109.182/chat';
 
 class ExternalGptService extends EventEmitter {
   constructor() {

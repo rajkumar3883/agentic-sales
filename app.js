@@ -23,7 +23,7 @@ const app = express();
 ExpressWs(app);
 //const ttsService = new ElevenLabsTTSService(streamService);
 
-
+const PUBLIC_URL= process.env.PUBLIC_URL;
 const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
@@ -80,7 +80,7 @@ app.get('/', (req, res) => {
     <body>
       <div class="container">
         <h1>Make a Call</h1>
-        <form action="http://3.110.47.194/makecall" method="get">
+        <form action="http://15.207.109.182/makecall" method="get">
           <input type="text" id="phonenumber" name="phonenumber" placeholder="Enter phone number" required>
           <br>
           <button type="submit">Call</button>
@@ -101,10 +101,14 @@ app.post('/incoming', (req, res) => {
   console.log("landed in incoming")
   console.log("url", process.env.SERVER);
   try {
+   console.log("in incoming try");
     const response = new VoiceResponse();
+console.log("in incoming try after response");
     const connect = response.connect();
+console.log("in incoming try after connect");
     connect.stream({ url: `wss://${process.env.SERVER}/connection` });
-  
+  console.log("in incoming try after stream");
+console.log(`wss://${process.env.SERVER}/connection`);
     res.type('text/xml');
     res.end(response.toString());
   } catch (err) {
