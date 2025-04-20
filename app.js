@@ -153,7 +153,7 @@ app.ws('/connection', (ws) => {
           //const reply ="Hello sir ji !";
               // 👇 INSTEAD of hardcoding reply, do:
              const welcomeMessage = "You are now connected. Please greet the customer politely."; // your instruction to GPT
-             const reply = await gptService.completion(welcomeMessage);
+             const gptReply = await gptService.completion(welcomeMessage);
 
             console.log("First GPT reply:", gptReply.partialResponse || gptReply);
             //await getChatCompletion("") || "Hi, how can I help?";
