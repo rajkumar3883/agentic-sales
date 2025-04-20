@@ -150,7 +150,7 @@ app.ws('/connection', (ws) => {
         recordingService(ttsService, callSid).then(async () => {
           console.log("under ttsService then");
           console.log(`Twilio -> Starting Media Stream for ${streamSid}`.underline.red);
-          const reply ="Hello !";
+          const reply ="Hello sir!";
             //await getChatCompletion("") || "Hi, how can I help?";
           ttsService.generate({ partialResponseIndex: null, partialResponse: reply }, 0);
           console.log("under ttsService then after");
