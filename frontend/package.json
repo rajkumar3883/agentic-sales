@@ -1,6 +1,7 @@
 {
   "name": "frontend",
   "version": "0.1.0",
+  "homepage": "/crm",
   "private": true,
   "dependencies": {
     "@supabase/supabase-js": "^2.49.4",

@@ -5,11 +5,11 @@ const FROM_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 const client = require('twilio')(accountSid, authToken);
 async function makeOutBoundCall(phoneNumber) {
   console.log("phoneNumber", phoneNumber);
-  console.log(`http://${process.env.SERVER}/incoming`);
+  console.log(`https://${process.env.SERVER}/incoming`);
   if (phoneNumber && phoneNumber != "") {
     try {
       const call = await client.calls.create({
-        url: `http://${process.env.SERVER}/incoming`,
+        url: `https://${process.env.SERVER}/incoming`,
         to: phoneNumber,
         from: FROM_NUMBER
       });

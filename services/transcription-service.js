@@ -3,7 +3,6 @@ const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const { Buffer } = require('node:buffer');
 const EventEmitter = require('events');
 
-
 class TranscriptionService extends EventEmitter {
   constructor() {
     super();
@@ -16,11 +15,10 @@ class TranscriptionService extends EventEmitter {
       punctuate: true,
       interim_results: true,
       endpointing: 200,
-      utterance_end_ms: 1000
+      utterance_end_ms: 300
     });
 
-    this.finalResult = '';
-    this.speechFinal = true; // used to determine if we have seen speech_final=true indicating that deepgram detected a natural pause in the speakers speech. 
+    this.speechFinal = true; // used to determine if we have seen speech_final=true indicating that deepgram detected a natural pause in the speakers speech.
 
     this.dgConnection.on(LiveTranscriptionEvents.Open, () => {
       this.dgConnection.on(LiveTranscriptionEvents.Transcript, (transcriptionEvent) => {
@@ -29,34 +27,37 @@ class TranscriptionService extends EventEmitter {
         if (alternatives) {
           text = alternatives[0]?.transcript;
         }
-        
-        // if we receive an UtteranceEnd and speech_final has not already happened then we should consider this the end of of the human speech and emit the transcription
+
+        // If we receive an UtteranceEnd, emit a special flag to indicate speech has ended
         if (transcriptionEvent.type === 'UtteranceEnd') {
-          if (!this.speechFinal) {
-            console.log(`UtteranceEnd received before speechFinal, emit the text collected so far: ${this.finalResult}`.yellow);
-            this.emit('transcription', this.finalResult);
-            return;
-          } else {
-            console.log('STT -> Speech was already final when UtteranceEnd recevied'.yellow);
-            return;
-          }
+          console.log('UtteranceEnd received, emitting utterance end event'.yellow);
+          this.emit('transcription', {
+            text: '',
+            isFinal: true,
+            speechFinal: true,
+            utteranceEnd: true
+          });
+          return;
         }
-    
-        // console.log(text, "is_final: ", transcription?.is_final, "speech_final: ", transcription.speech_final);
-        // if is_final that means that this chunk of the transcription is accurate and we need to add it to the finalResult 
-        if (transcriptionEvent.is_final === true && text.trim().length > 0) {
-          this.finalResult += ` ${text}`;
-          // if speech_final and is_final that means this text is accurate and it's a natural pause in the speakers speech. We need to send this to the assistant for processing
-          if (transcriptionEvent.speech_final === true) {
-            this.speechFinal = true; // this will prevent a utterance end which shows up after speechFinal from sending another response
-            this.emit('transcription', this.finalResult);
-            this.finalResult = '';
-          } else {
-            // if we receive a message without speechFinal reset speechFinal to false, this will allow any subsequent utteranceEnd messages to properly indicate the end of a message
-            this.speechFinal = false;
-          }
-        } else {
-          this.emit('utterance', text);
+
+        // Stream every piece of text immediately with appropriate flags
+        if (text.trim().length > 0) {
+          console.log(`Streaming text: "${text}" is_final: ${transcriptionEvent.is_final}, speech_final: ${transcriptionEvent.speech_final}`.cyan);
+          this.emit('transcription', {
+            text: text,
+            isFinal: transcriptionEvent.is_final === true,
+            speechFinal: transcriptionEvent.speech_final === true,
+            utteranceEnd: false
+          });
+        }
+
+        // Track speech_final status
+        if (transcriptionEvent.speech_final === true) {
+          this.speechFinal = true;
+          console.log('Speech marked as final'.green);
+        } else if (transcriptionEvent.is_final === true) {
+          // Reset speechFinal if we receive final text that isn't marked as speech_final
+          this.speechFinal = false;
         }
       });
 
