@@ -1,8 +1,8 @@
 require("dotenv").config();
 require("colors");
-//console.log("deep_gram", process.env.DEEPGRAM_API_KEY); // Confirm Deepgram API key presence
 const express = require("express");
 const ExpressWs = require("express-ws");
+const cors = require('cors');
 const { StreamService } = require("./services/stream-service");
 const { TranscriptionService } = require("./services/transcription-service");
 const { ElevenLabsTTSService } = require("./services/tts-service");
@@ -11,14 +11,22 @@ const { recordingService } = require("./services/recording-service");
 const { makeOutBoundCall } = require("./scripts/outbound-call.js");
 const VoiceResponse = require("twilio").twiml.VoiceResponse;
 const logger = require("./logger_conf.js");
+//redis
+const { setKey, getKey, deleteKey } = require("./services/redis-service.js");
+const bodyParser = require("body-parser");
 const app = express();
 ExpressWs(app);
-
+//
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
 const PORT = process.env.PORT || 3000;
 const WEBSOCKET_URL = process.env.SERVER;
 
 // Active call sessions store
 const activeSessions = new Map();
+// Store CallerDetails for each call session
+const callerDetailsStore = new Map();
 
 // Timing utility functions
 const createTimer = () => {
@@ -34,7 +42,80 @@ const createTimer = () => {
   };
   return timer;
 };
+//
+// Simple route to store data in Redis
+app.post("/api/redis/set", async (req, res) => {
+  console.log("in set key...");
+  try {
+    const { key, value, ttl } = req.body;
+    console.log("key", key);
+    if (!key || !value) {
+      return res.status(400).json({
+        success: false,
+        error: "Key and value are required",
+      });
+    }
 
+    //await redisService.set(key, value, ttl);
+    await setKey(key, value);
+    // res.send(`Key '${key}' cached.`);
+
+    res.json({
+      success: true,
+      message: "Data stored successfully",
+      key: key,
+    });
+  } catch (error) {
+    logger.error("Failed to store data in Redis:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to store data",
+    });
+  }
+});
+// Optional: Route to get data
+app.get("/api/redis/get/:key", async (req, res) => {
+  try {
+    const key = req.params.key;
+    const value = await getKey(key);
+
+    if (value === null) {
+      return res.status(404).json({
+        success: false,
+        error: "Key not found",
+      });
+    }
+
+    res.json({
+      success: true,
+      data: value,
+    });
+  } catch (error) {
+    logger.error("Failed to get data from Redis:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to get data",
+    });
+  }
+});
+// Optional: Route to delete data
+app.delete("/api/redis/delete/:key", async (req, res) => {
+  try {
+    const key = req.params.key;
+    await deleteKey(key);
+
+    res.json({
+      success: true,
+      message: "Data deleted successfully",
+    });
+  } catch (error) {
+    logger.error("Failed to delete data from Redis:", error);
+    res.status(500).json({
+      success: false,
+      error: "Failed to delete data",
+    });
+  }
+});
 // Home page with call form
 app.get("/", async (req, res) => {
   res.send(`
@@ -57,37 +138,85 @@ app.get("/", async (req, res) => {
     </html>
   `);
 });
-
-// Make outbound call endpoint
-app.get("/makecall", (req, res) => {
-  const phoneNumber = req.query.phonenumber;
+app.post("/makecall", async(req, res) => {
+  //console.log("req.body",req.body);
+   const { phoneNumber, leadName, leadId, aiModel, ttsService, promptDetails, policyDetails } = req.body;
   if (!phoneNumber) {
     return res.status(400).send("Phone number is required");
   }
-
+  if (!leadName) {
+    return res.status(400).send("Lead Name is required");
+  }
+  if (!leadId) {
+    return res.status(400).send("Lead Id is required");
+  }
+  if (!promptDetails.id) {
+    return res.status(400).send("Prompt Id is required");
+  } 
+  const CallerDetails = {
+    "phoneNumber": phoneNumber,
+    "leadName": leadName,
+    "leadId": leadId,
+    "aiModel": aiModel,
+    "ttsService": ttsService,
+    "promptId": "prompt:" + promptDetails.id,
+    "policyId": policyDetails?.id || null,
+    //"promptDetails": promptDetails,
+    //"policyDetails": policyDetails,
+    "timestamp": req.body.timestamp
+  };  
+  console.log(CallerDetails);
   logger.info("Making outbound call to:", phoneNumber);
-  makeOutBoundCall(phoneNumber)
-    .then(() => {
-      res.send(
-        `Call initiated to ${phoneNumber}. Please wait for the connection.`
-      );
-    })
-    .catch((err) => {
-      console.error("Failed to make call:", err);
-      res.status(500).send(`Failed to make call: ${err.message}`);
+  try {
+    // Store CallerDetails temporarily with a callback ID
+    const callbackKey = `callback_${leadId}_${Date.now()}`;
+    await setKey(callbackKey, JSON.stringify(CallerDetails), 3600); // Store for 1 hour
+    
+    // Pass the callback key to the outbound call
+    const callResult = await makeOutBoundCall({
+      ...CallerDetails,
+      callbackKey: callbackKey
     });
+    
+    res.json({
+      success: true,
+      message: `Call initiated to ${phoneNumber}`,
+      callbackKey: callbackKey
+    });
+  } catch (err) {
+    logger.error("Failed to make call:", err);
+    res.status(500).json({
+      success: false,
+      error: `Failed to make call: ${err.message}`
+    });
+  }
 });
 
+
 // Handle incoming Twilio calls
-app.post("/incoming", (req, res) => {
+app.post("/incoming", async(req, res) => {
   logger.info("Incoming call received");
 
   try {
     const response = new VoiceResponse();
     const connect = response.connect();
+        // Get Call Parameters from Twilio
+    const callSid = req.body.CallSid;
+    const fromNumber = req.body.From;
+    const toNumber = req.body.To;
+    
+    const callbackKey = req.body.callbackKey; // Pass this in outbound call parameters
+    if (callbackKey) {
+      const callerDetailsJson = await getKey(callbackKey);
+      if (callerDetailsJson) {
+        const callerDetails = JSON.parse(callerDetailsJson);
+        callerDetailsStore.set(callSid, callerDetails);
+        logger.info(`Retrieved CallerDetails for CallSid: ${callSid}`, callerDetails);
+      }
+    }
 
     // Use the environment variable for the WebSocket URL
-    const wsUrl = `wss://${WEBSOCKET_URL}/connection`;
+    const wsUrl = `wss://${WEBSOCKET_URL}/connection?callSid=${callSid}`;
     logger.info(`Connecting call to WebSocket: ${wsUrl}`);
 
     connect.stream({ url: wsUrl });
@@ -103,6 +232,10 @@ app.post("/incoming", (req, res) => {
 // WebSocket connection endpoint for Twilio Media Streams
 app.ws("/connection", (ws) => {
   logger.info("New WebSocket connection established");
+   // Get CallSid from query params
+  const url = require('url');
+  const queryParams = url.parse(req.url, true).query;
+  const preliminaryCallSid = queryParams.callSid;
 
   // Track connection state and resources
   const session = {
@@ -112,7 +245,7 @@ app.ws("/connection", (ws) => {
     marks: [],
     active: true,
     startTime: Date.now(),
-    transcriptionBuffer: "", // Buffer to accumulate finalizing transcription chunks
+    transcriptionBuffer: "",
     timers: {
       transcription: createTimer(),
       gpt: createTimer(),

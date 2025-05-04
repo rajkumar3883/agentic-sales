@@ -3,19 +3,21 @@ const accountSid = process.env.TWILIO_ACCOUNT_SID;
 const authToken = process.env.TWILIO_AUTH_TOKEN;
 const FROM_NUMBER = process.env.TWILIO_PHONE_NUMBER;
 const client = require('twilio')(accountSid, authToken);
-async function makeOutBoundCall(phoneNumber) {
-  console.log("phoneNumber", phoneNumber);
+async function makeOutBoundCall(callerDetails) {
+  console.log("phoneNumber", callerDetails.phoneNumber);
   console.log(`https://${process.env.SERVER}/incoming`);
-  if (phoneNumber && phoneNumber != "") {
+  if (callerDetails.phoneNumber && callerDetails.phoneNumber != "") {
     try {
       const call = await client.calls.create({
-        url: `https://${process.env.SERVER}/incoming`,
-        to: phoneNumber,
+        url: `https://${process.env.SERVER}/incoming?callbackKey=${callerDetails.callbackKey}`,
+        to: callerDetails.phoneNumber,
         from: FROM_NUMBER
       });
-      console.log(call.sid);
+       console.log(`Outbound call initiated with SID: ${call.sid}`);
+       return call;
     } catch (error) {
       console.error('Error making outbound call:', error);
+      throw error;
     }
   } else {
     console.log("Phone number is empty");
