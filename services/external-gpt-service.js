@@ -33,9 +33,11 @@ class ExternalGptService extends EventEmitter {
     super();
     this.sessionId = null;
     this.interactionCount = 0;
+    this.callerDetails={};
   }
-  registerSession(sessionId) {
+  registerSession(sessionId,callerDetails) {
     this.sessionId = sessionId;
+    this.callerDetails=callerDetails;
     console.log(`[ExternalGptService] Registered session: ${sessionId}`);
   }
   async completion(text) {
@@ -45,6 +47,7 @@ class ExternalGptService extends EventEmitter {
       text,
       interactionCount: this.interactionCount,
       session_id:this.sessionId,
+      callerDetails:this.callerDetails,
 
     });
 

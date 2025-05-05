@@ -2,7 +2,7 @@
 const Redis = require("ioredis");
 
 const redis = new Redis({
-  host: "15.207.109.182", // or hostname
+  host: "127.0.0.1", // or hostname
   port: 6379,
   // password: 'yourRedisPassword', // Uncomment if you enabled authentication
 });

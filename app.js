@@ -139,7 +139,7 @@ app.get("/", async (req, res) => {
   `);
 });
 app.post("/makecall", async(req, res) => {
-  //console.log("req.body",req.body);
+  console.log("req.body",req.body);
    const { phoneNumber, leadName, leadId, aiModel, ttsService, promptDetails, policyDetails } = req.body;
   if (!phoneNumber) {
     return res.status(400).send("Phone number is required");
@@ -195,34 +195,49 @@ app.post("/makecall", async(req, res) => {
 
 // Handle incoming Twilio calls
 app.post("/incoming", async(req, res) => {
+console.log("incoming called...");
   logger.info("Incoming call received");
 
   try {
     const response = new VoiceResponse();
     const connect = response.connect();
         // Get Call Parameters from Twilio
-    const callSid = req.body.CallSid;
+    const callSid =req.body.CallSid;
     const fromNumber = req.body.From;
     const toNumber = req.body.To;
-    
-    const callbackKey = req.body.callbackKey; // Pass this in outbound call parameters
+    console.log("in try before callkey");
+console.log("req_body",req.body);
+//console.log("query_pass",req.query);
+console.log("call_ipddd",req.query.callbackKey);
+    const callbackKey = req.query.callbackKey; // Pass this in outbound call parameters
     if (callbackKey) {
+ console.log("in try in callkey");
       const callerDetailsJson = await getKey(callbackKey);
       if (callerDetailsJson) {
+ console.log("in_callerDetailsJson_callkey",callerDetailsJson);
         const callerDetails = JSON.parse(callerDetailsJson);
+console.log("before setting to callerDetailsStore.set");
         callerDetailsStore.set(callSid, callerDetails);
-        logger.info(`Retrieved CallerDetails for CallSid: ${callSid}`, callerDetails);
+       console.log("after setting to callerDetailsStore.set");
+        logger.info(`Retrieved CallerDetails for CallSid: ${callSid}`, callerDetailsJson);
       }
     }
-
+console.log("before connection call");
+console.log("callSid",callSid);
+console.log("callSid_from",fromNumber);
+console.log("callSid_to",toNumber);
+console.log("WEBSOCKET_URL",WEBSOCKET_URL);
+console.log(`wss://${WEBSOCKET_URL}/connection?callSid=${callSid}`);
     // Use the environment variable for the WebSocket URL
     const wsUrl = `wss://${WEBSOCKET_URL}/connection?callSid=${callSid}`;
+console.log("after wsurl");
     logger.info(`Connecting call to WebSocket: ${wsUrl}`);
-
+console.log("before connect sterwma..");
     connect.stream({ url: wsUrl });
-
+console.log("after connect sterwma..");
     res.type("text/xml");
     res.send(response.toString());
+console.log("aftersend sterwma..");
   } catch (err) {
     console.error("Error handling incoming call:", err);
     res.status(500).send("Error handling call");
@@ -230,13 +245,8 @@ app.post("/incoming", async(req, res) => {
 });
 
 // WebSocket connection endpoint for Twilio Media Streams
-app.ws("/connection", (ws) => {
-  logger.info("New WebSocket connection established");
-   // Get CallSid from query params
-  const url = require('url');
-  const queryParams = url.parse(req.url, true).query;
-  const preliminaryCallSid = queryParams.callSid;
-
+app.ws("/connection", (ws,req) => {
+console.log("in connection...");
   // Track connection state and resources
   const session = {
     streamSid: null,
@@ -262,6 +272,7 @@ app.ws("/connection", (ws) => {
       ttsTime: 0,
       interactionCount: 0,
     },
+callerDetails:{},
   };
 
   try {
@@ -278,7 +289,7 @@ app.ws("/connection", (ws) => {
       gptService,
       ttsService,
     };
-
+let callSid = null;
     // Handle incoming WebSocket messages
     ws.on("message", async function (data) {
       try {
@@ -289,13 +300,22 @@ app.ws("/connection", (ws) => {
           session.callSid = msg.start.callSid;
 
           activeSessions.set(session.callSid, session);
+      // Retrieve caller details
+      const callerDetails = callerDetailsStore.get(session.callSid);
+
+ if (callerDetails) {
+        logger.info(`Retrieved CallerDetails for WebSocket CallSid: ${callSid}`);
+        // Process with caller details
+session.callerDetails=callerDetails;     
+ }
+console.log("afgetete_ee",callerDetails);
 
           logger.info(
             `Call started: ${session.callSid} (Stream: ${session.streamSid})`
           );
 
           streamService.setStreamSid(session.streamSid);
-          gptService.registerSession(session.callSid);
+          gptService.registerSession(session.callSid,callerDetails);
 
           session.timers.roundTrip.reset();
           session.timers.gpt.reset();

@@ -28,9 +28,11 @@
     "openai": "^4.20.1",
     "python-shell": "^5.0.0",
     "twilio": "^4.19.3",
+    "url": "^0.11.4",
     "util": "^0.12.5",
     "uuid": "^9.0.1",
-    "wavefile": "^11.0.0"
+    "wavefile": "^11.0.0",
+    "winston": "^3.17.0"
   },
   "devDependencies": {
     "@flydotio/dockerfile": "^0.4.11",

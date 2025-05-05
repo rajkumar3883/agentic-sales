@@ -6,10 +6,12 @@ const client = require('twilio')(accountSid, authToken);
 async function makeOutBoundCall(callerDetails) {
   console.log("phoneNumber", callerDetails.phoneNumber);
   console.log(`https://${process.env.SERVER}/incoming`);
+console.log(`http://${process.env.SERVER}/incoming?callbackKey=${callerDetails.callbackKey}`);
+//console.log(`http://${process.env.SERVER}/incoming?callbackKey=${callerDetails.callbackKey}`)
   if (callerDetails.phoneNumber && callerDetails.phoneNumber != "") {
     try {
       const call = await client.calls.create({
-        url: `https://${process.env.SERVER}/incoming?callbackKey=${callerDetails.callbackKey}`,
+        url: `http://${process.env.SERVER}/incoming?callbackKey=${callerDetails.callbackKey}`,
         to: callerDetails.phoneNumber,
         from: FROM_NUMBER
       });
