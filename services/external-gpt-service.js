@@ -27,7 +27,7 @@ const axios = require('axios');
 const EventEmitter = require('events');
 
 const GPT_API_URL = 'http://15.207.109.182/chat';
-
+const logger = require("./../logger_conf.js");
 class ExternalGptService extends EventEmitter {
   constructor() {
     super();
@@ -37,11 +37,12 @@ class ExternalGptService extends EventEmitter {
   }
   registerSession(sessionId,callerDetails) {
     this.sessionId = sessionId;
-    this.callerDetails=callerDetails;
-    console.log(`[ExternalGptService] Registered session: ${sessionId}`);
+    this.callerDetails = callerDetails;
+    console.log(`[ExternalGptService] Registered session: ${sessionId}, callerDetails: ${callerDetails}`);
   }
   async completion(text) {
      console.log(`[ExternalGptService] Session ${this.sessionId}`);
+logger.info(`[ExternalGptService] Session ${this.sessionId}`);
   try {
     const response = await axios.post(GPT_API_URL, {
       text,
@@ -50,7 +51,8 @@ class ExternalGptService extends EventEmitter {
       callerDetails:this.callerDetails,
 
     });
-
+console.log("callerDetails",this.callerDetails);
+logger.info(this.callerDetails);
     if (response.data && response.data.response) {
       const fullResponse = response.data.response;
 
@@ -70,11 +72,12 @@ class ExternalGptService extends EventEmitter {
       this.interactionCount++;
       return fullResponse;
     }
-
+logger.error(`Unexpected response from GPT API  ${response.data}`);
     console.error('Unexpected response from GPT API:', response.data);
     return 'Sorry, I could not process that.';
   } catch (error) {
     console.error('Error calling GPT API:', error.message);
+logger.error(`Error calling GPT API  ${error.message}`);
     return 'Sorry, something went wrong.';
   }
 }
