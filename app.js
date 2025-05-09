@@ -42,59 +42,6 @@ const createTimer = () => {
   };
   return timer;
 };
-const logTimingMetrics = (stage, metrics) => {
-  const formattedMetrics = Object.entries(metrics)
-    .map(([key, value]) => `${key}: ${value}ms`)
-    .join(", ");
-
-  logger.info(
-    `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][${stage}] ${formattedMetrics}`
-  );
-  console.log(
-    `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][${stage}]`
-      .cyan,
-    formattedMetrics
-  );
-};
-// Function to save complete round metrics when a round finishes
-const saveRoundMetrics = () => {
-  // Calculate total round trip time
-  const totalTime =
-    session.currentRound.transcriptionTime +
-    session.currentRound.gptTime +
-    session.currentRound.ttsTime;
-
-  // Set end time for this round
-  session.currentRound.endTime = Date.now();
-  session.currentRound.totalRoundTripTime = totalTime;
-
-  // Create a complete metrics object for the round
-  const roundMetrics = {
-    ...session.currentRound,
-    timestamp: new Date().toISOString(),
-    actualRoundTripTime:
-      session.currentRound.endTime - session.currentRound.startTime,
-  };
-
-  // Add to the session metrics history
-  session.metrics.rounds.push(roundMetrics);
-
-  // Log the complete round metrics
-  logTimingMetrics("COMPLETE", {
-    transcription: session.currentRound.transcriptionTime,
-    gpt: session.currentRound.gptTime,
-    tts: session.currentRound.ttsTime,
-    calculated_total: totalTime,
-    actual_total: roundMetrics.actualRoundTripTime,
-  });
-
-  // Store in Redis for later analysis
-  const metricsKey = `metrics_${session.callSid}_round_${session.currentRound.interactionCount}`;
-  setKey(metricsKey, JSON.stringify(roundMetrics), 86400); // Store for 24 hours
-
-  // Reset for next round
-  session.metrics.lastInteractionStartTime = null;
-};
 // Simple route to store data in Redis
 app.post("/api/redis/set", async (req, res) => {
   console.log("in set key...");
@@ -338,6 +285,60 @@ app.ws("/connection", (ws, req) => {
       endTime: null,
     },
     callerDetails: {},
+  };
+
+  const logTimingMetrics = (stage, metrics) => {
+    const formattedMetrics = Object.entries(metrics)
+      .map(([key, value]) => `${key}: ${value}ms`)
+      .join(", ");
+
+    logger.info(
+      `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][${stage}] ${formattedMetrics}`
+    );
+    console.log(
+      `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][${stage}]`
+        .cyan,
+      formattedMetrics
+    );
+  };
+  // Function to save complete round metrics when a round finishes
+  const saveRoundMetrics = () => {
+    // Calculate total round trip time
+    const totalTime =
+      session.currentRound.transcriptionTime +
+      session.currentRound.gptTime +
+      session.currentRound.ttsTime;
+
+    // Set end time for this round
+    session.currentRound.endTime = Date.now();
+    session.currentRound.totalRoundTripTime = totalTime;
+
+    // Create a complete metrics object for the round
+    const roundMetrics = {
+      ...session.currentRound,
+      timestamp: new Date().toISOString(),
+      actualRoundTripTime:
+        session.currentRound.endTime - session.currentRound.startTime,
+    };
+
+    // Add to the session metrics history
+    session.metrics.rounds.push(roundMetrics);
+
+    // Log the complete round metrics
+    logTimingMetrics("COMPLETE", {
+      transcription: session.currentRound.transcriptionTime,
+      gpt: session.currentRound.gptTime,
+      tts: session.currentRound.ttsTime,
+      calculated_total: totalTime,
+      actual_total: roundMetrics.actualRoundTripTime,
+    });
+
+    // Store in Redis for later analysis
+    const metricsKey = `metrics_${session.callSid}_round_${session.currentRound.interactionCount}`;
+    setKey(metricsKey, JSON.stringify(roundMetrics), 86400); // Store for 24 hours
+
+    // Reset for next round
+    session.metrics.lastInteractionStartTime = null;
   };
 
   try {
