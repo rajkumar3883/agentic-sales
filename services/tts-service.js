@@ -140,11 +140,18 @@ class ElevenLabsTTSService extends EventEmitter {
 
       console.error(`Error in ElevenLabs TTS (${totalTime}ms):`, err);
       logger.error(
-        `[TIMING] TTS error after ${totalTime}ms for interaction ${interactionCount}:`,
-        err
+        `[TIMING] TTS error after ${totalTime}ms for interaction ${interactionCount}: ${err.message}`
       );
 
       this.emit("tts_error", err, partialResponseIndex, interactionCount);
+      // We should also emit speech_ready with the error info so the round completes
+      this.emit(
+        "speech_ready",
+        requestId,
+        totalTime,
+        "ERROR: " + err.message,
+        interactionCount
+      );
       // Clean up the timer
       this.timers.delete(requestId);
 

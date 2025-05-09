@@ -518,7 +518,34 @@ app.ws("/connection", (ws, req) => {
       session.timers.tts.reset();
       await ttsService.generate(gptReply, interactionCount);
     });
+    // Find this event listener in your WebSocket connection handler
+    ttsService.on(
+      "tts_error",
+      (err, partialResponseIndex, interactionCount, ttsTime) => {
+        // Log the error properly without referencing session directly
+        logger.error(
+          `[TIMING][Round: ${interactionCount}][TTS] Error after ${
+            ttsTime || 0
+          }ms: ${err.message}`
+        );
 
+        if (session && session.active) {
+          // If we have timing information, record it
+          if (ttsTime) {
+            session.currentRound.ttsTime = ttsTime;
+
+            // Log the timing
+            logger.info(
+              `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][TTS] Error processing time: ${ttsTime}ms`
+            );
+
+            // Even though there was an error, we should still save the metrics for this round
+            saveRoundMetrics();
+          }
+        }
+      }
+    );
+    // The speech_ready handler should now handle both success and error cases:
     ttsService.on(
       "speech_ready",
       (requestId, ttsTime, partialResponse, interactionCount) => {
@@ -526,17 +553,27 @@ app.ws("/connection", (ws, req) => {
 
         session.currentRound.ttsTime = ttsTime;
 
-        // Log TTS time
-        logger.info(
-          `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][TTS] Processing time: ${session.currentRound.ttsTime}ms`
-        );
+        // Check if this was an error response
+        const isError = partialResponse && partialResponse.startsWith("ERROR:");
 
-        // Now that all three services have completed, save the complete round metrics
+        // Log TTS time
+        if (isError) {
+          logger.info(
+            `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][TTS] Error processing time: ${session.currentRound.ttsTime}ms`
+          );
+        } else {
+          logger.info(
+            `[TIMING][Call: ${session.callSid}][Round: ${session.currentRound.interactionCount}][TTS] Processing time: ${session.currentRound.ttsTime}ms`
+          );
+        }
+
+        // Now that all three services have completed (even with error), save the complete round metrics
         saveRoundMetrics();
       }
     );
   } catch (error) {
     console.error("Error handling WebSocket:", error);
+    logger.error(`Error handling WebSocket: ${error}`);
   }
 });
 
