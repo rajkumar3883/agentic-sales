@@ -22,9 +22,20 @@ const getKey = async (key) => {
 const deleteKey = async (key) => {
   await redis.del(key);
 };
+async function getKeysByPattern(pattern) {
+  try {
+    // Using the Redis KEYS command (be cautious with large datasets)
+    const keys = await redisClient.keys(pattern);
+    return keys;
+  } catch (error) {
+    console.error("Error getting keys by pattern:", error);
+    return [];
+  }
+}
 
 module.exports = {
   setKey,
   getKey,
   deleteKey,
+  getKeysByPattern,
 };
