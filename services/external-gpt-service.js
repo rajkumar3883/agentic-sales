@@ -48,7 +48,7 @@ logger.info(`[ExternalGptService] Session ${this.sessionId}`);
       text,
       interactionCount: this.interactionCount,
       session_id:this.sessionId,
-      callerDetails:this.callerDetails,
+      callerdetails:this.callerDetails,
 
     });
 console.log("callerDetails",this.callerDetails);
@@ -77,7 +77,9 @@ logger.error(`Unexpected response from GPT API  ${response.data}`);
     return 'Sorry, I could not process that.';
   } catch (error) {
     console.error('Error calling GPT API:', error.message);
-logger.error(`Error calling GPT API  ${error.message}`);
+// logger.error(Error calling GPT API:', error.message);
+logger.error(`Error calling GPT text:  ${text} interactionCount: ${this.interactionCount},session_id: ${this.sessionId},callerdetails: ${JSON.stringify(this.callerDetails)}`);
+logger.error(`Error calling GPT API  ${error.message} ${JSON.stringify(this.callerDetails)}`);
     return 'Sorry, something went wrong.';
   }
 }
