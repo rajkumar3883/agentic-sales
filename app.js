@@ -13,6 +13,9 @@ const VoiceResponse = require("twilio").twiml.VoiceResponse;
 const logger = require("./logger_conf.js");
 //redis
 const { setKey, getKey, deleteKey } = require("./services/redis-service.js");
+// Add Supabase import
+const { supabase } = require("./supabase-config");
+
 const bodyParser = require("body-parser");
 const app = express();
 ExpressWs(app);
@@ -138,7 +141,7 @@ app.get("/", async (req, res) => {
   `);
 });
 app.post("/makecall", async (req, res) => {
-  console.log("req.body", req.body);
+  //console.log("req.body", req.body);
   const {
     phoneNumber,
     leadName,
@@ -384,7 +387,8 @@ app.ws("/connection", (ws, req) => {
 
           streamService.setStreamSid(session.streamSid);
           gptService.registerSession(session.callSid, callerDetails);
-
+          // Add this line to start recording here
+          await recordingService(ttsService, session.callSid);
           session.timers.roundTrip.reset();
           session.timers.gpt.reset();
           session.currentRound = {
@@ -798,7 +802,101 @@ app.get("/api/metrics/recent", async (req, res) => {
     });
   }
 });
+//
+// In your Express server file
+app.post("/recording-status", async (req, res) => {
+  try {
+    // Check if the recording is completed
+    if (req.body.RecordingStatus === "completed") {
+      const recordingSid = req.body.RecordingSid;
+      const recordingUrl = req.body.RecordingUrl;
+      const callSid = req.body.CallSid;
+      const recordingDuration = req.body.RecordingDuration;
 
+      console.log(`Recording completed for call ${callSid}`.green);
+      console.log(`Recording URL: ${recordingUrl}`.cyan);
+
+      // Download the recording from Twilio
+      const recordingBuffer = await downloadRecordingBuffer(recordingUrl);
+
+      // Generate a unique filename
+      const timestamp = new Date().toISOString().replace(/[:.]/g, "");
+      const filename = `${callSid}_${timestamp}.wav`;
+
+      // Upload the recording to Supabase Storage
+      const { data: fileData, error: fileError } = await supabase.storage
+        .from("call-recordings") // Your bucket name
+        .upload(filename, recordingBuffer, {
+          contentType: "audio/wav",
+          cacheControl: "3600",
+        });
+
+      if (fileError) {
+        console.error("Error uploading to Supabase Storage:".red, fileError);
+        throw fileError;
+      }
+
+      // Get public URL for the file
+      const { data: publicUrlData } = supabase.storage
+        .from("call-recordings")
+        .getPublicUrl(filename);
+
+      const publicUrl = publicUrlData.publicUrl;
+
+      // Update the record in the database
+      const { data, error } = await supabase.from("call_recordings").upsert(
+        {
+          call_sid: callSid,
+          recording_sid: recordingSid,
+          recording_url: recordingUrl, // Original Twilio URL
+          storage_path: filename,
+          public_url: publicUrl,
+          duration_seconds: recordingDuration,
+          status: "completed",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "recording_sid" }
+      );
+
+      if (error) {
+        console.error("Error saving to Supabase database:".red, error);
+        throw error;
+      }
+
+      console.log(`Recording saved to Supabase for call ${callSid}`.green);
+    }
+
+    res.status(200).send("Recording status received");
+  } catch (error) {
+    console.error("Error processing recording:".red, error);
+    res.status(500).send("Error processing recording");
+  }
+});
+
+// Function to download the recording as a buffer
+async function downloadRecordingBuffer(recordingUrl) {
+  const axios = require("axios");
+
+  try {
+    // Add authentication to the URL
+    const authenticatedUrl = recordingUrl.replace(
+      "https://",
+      `https://${process.env.TWILIO_ACCOUNT_SID}:${process.env.TWILIO_AUTH_TOKEN}@`
+    );
+
+    // Download the file
+    const response = await axios({
+      method: "GET",
+      url: authenticatedUrl,
+      responseType: "arraybuffer", // Important for binary data
+    });
+
+    return Buffer.from(response.data);
+  } catch (error) {
+    console.error("Error downloading recording:".red, error);
+    throw error;
+  }
+}
 //
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
