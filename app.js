@@ -143,6 +143,7 @@ app.get("/", async (req, res) => {
 app.post("/makecall", async (req, res) => {
   //console.log("req.body", req.body);
   const {
+    callId,
     phoneNumber,
     leadName,
     leadId,
@@ -164,6 +165,7 @@ app.post("/makecall", async (req, res) => {
     return res.status(400).send("Prompt Id is required");
   }
   const CallerDetails = {
+    callId: callId,
     phoneNumber: phoneNumber,
     leadName: leadName,
     leadId: leadId,
@@ -219,6 +221,7 @@ app.post("/incoming", async (req, res) => {
     //console.log("query_pass",req.query);
     console.log("call_ipddd", req.query.callbackKey);
     const callbackKey = req.query.callbackKey; // Pass this in outbound call parameters
+    console.log("callbackKey", callbackKey);
     if (callbackKey) {
       console.log("in try in callkey");
       const callerDetailsJson = await getKey(callbackKey);
@@ -811,8 +814,13 @@ app.post("/recording-status", async (req, res) => {
       const recordingSid = req.body.RecordingSid;
       const recordingUrl = req.body.RecordingUrl;
       const callSid = req.body.CallSid;
-      const recordingDuration = req.body.RecordingDuration;
+      console.log("callSid", callSid);
+      console.log("req.body", req.body);
+      const callerDetails = callerDetailsStore.get(callSid);
+      console.log("callerDetails_callSid", JSON.stringify(callerDetails));
 
+      const recordingDuration = req.body.RecordingDuration;
+      const callId = callerDetails.callId;
       console.log(`Recording completed for call ${callSid}`.green);
       console.log(`Recording URL: ${recordingUrl}`.cyan);
 
@@ -857,6 +865,23 @@ app.post("/recording-status", async (req, res) => {
         },
         { onConflict: "recording_sid" }
       );
+      const { data: updateData, error: updateError } = await supabase
+        .from("calls")
+        .update({
+          recording_url: publicUrl,
+        })
+        .eq("id", callId);
+
+      if (updateError) {
+        console.error(
+          "Error updating call record with recording URL:".red,
+          updateError
+        );
+      } else {
+        console.log(
+          `Successfully updated call record ${callId} with recording URL`.green
+        );
+      }
 
       if (error) {
         console.error("Error saving to Supabase database:".red, error);
