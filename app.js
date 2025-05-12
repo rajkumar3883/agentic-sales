@@ -15,7 +15,10 @@ const logger = require("./logger_conf.js");
 const { setKey, getKey, deleteKey } = require("./services/redis-service.js");
 // Add Supabase import
 const { supabase } = require("./supabase-config");
-
+//
+const apiRoutes = require("./routes/api");
+const adminRoutes = require("./routes/admin");
+//
 const bodyParser = require("body-parser");
 const app = express();
 ExpressWs(app);
@@ -23,6 +26,19 @@ ExpressWs(app);
 app.use(cors());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
+// API routes for Android app (protected by API key)
+app.use("/api/v1", apiRoutes);
+
+// Admin routes (protected by admin token)
+app.use("/admin", adminRoutes);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  logger.error("Unhandled error:", err);
+  res.status(500).json({
+    success: false,
+    error: "An unexpected error occurred",
+  });
+});
 const PORT = process.env.PORT || 3000;
 const WEBSOCKET_URL = process.env.SERVER;
 
