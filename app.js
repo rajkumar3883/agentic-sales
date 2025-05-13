@@ -418,12 +418,12 @@ app.ws("/connection", (ws, req) => {
             ttsTime: 0,
           };
 
-          const welcome = await gptService.completion(" ");
+         // const welcome = await gptService.completion(" ");
 
-          session.currentRound.gptTime = session.timers.gpt.elapsed();
-          logger.info(
+         // session.currentRound.gptTime = session.timers.gpt.elapsed();
+         /* logger.info(
             `[TIMING] Welcome message - GPT: ${session.currentRound.gptTime}ms`
-          );
+          );*/
 
           session.timers.tts.reset();
         } else if (msg.event === "media") {
