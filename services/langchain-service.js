@@ -29,7 +29,7 @@ class LangchainService extends EventEmitter {
     // Initialize OpenAI client - use process.env.OPENAI_API_KEY directly
     try {
       this.openaiClient = new OpenAI({
-        apiKey: openaiApiKey
+        apiKey: openaiApiKey || process.env.OPENAI_API_KEY
       });
       logger.info('[LangchainService] OpenAI client initialized successfully');
     } catch (error) {
@@ -39,7 +39,7 @@ class LangchainService extends EventEmitter {
     // Initialize Google Gemini client
     try {
       this.googleClient = new GoogleGenerativeAI(
-        googleApiKey
+        googleApiKey || process.env.GOOGLE_API_KEY
       );
       logger.info('[LangchainService] Google client initialized successfully');
     } catch (error) {
