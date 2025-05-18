@@ -27,27 +27,32 @@ const axios = require('axios');
 const EventEmitter = require('events');
 
 const GPT_API_URL = 'http://15.207.109.182/chat';
-
+const logger = require("./../logger_conf.js");
 class ExternalGptService extends EventEmitter {
   constructor() {
     super();
     this.sessionId = null;
     this.interactionCount = 0;
+    this.callerDetails={};
   }
-  registerSession(sessionId) {
+  registerSession(sessionId,callerDetails) {
     this.sessionId = sessionId;
-    console.log(`[ExternalGptService] Registered session: ${sessionId}`);
+    this.callerDetails = callerDetails;
+    console.log(`[ExternalGptService] Registered session: ${sessionId}, callerDetails: ${callerDetails}`);
   }
   async completion(text) {
      console.log(`[ExternalGptService] Session ${this.sessionId}`);
+logger.info(`[ExternalGptService] Session ${this.sessionId}`);
   try {
     const response = await axios.post(GPT_API_URL, {
       text,
       interactionCount: this.interactionCount,
       session_id:this.sessionId,
+      callerdetails:this.callerDetails,
 
     });
-
+console.log("callerDetails",this.callerDetails);
+logger.info(this.callerDetails);
     if (response.data && response.data.response) {
       const fullResponse = response.data.response;
 
@@ -67,11 +72,14 @@ class ExternalGptService extends EventEmitter {
       this.interactionCount++;
       return fullResponse;
     }
-
+logger.error(`Unexpected response from GPT API  ${response.data}`);
     console.error('Unexpected response from GPT API:', response.data);
     return 'Sorry, I could not process that.';
   } catch (error) {
     console.error('Error calling GPT API:', error.message);
+// logger.error(Error calling GPT API:', error.message);
+logger.error(`Error calling GPT text:  ${text} interactionCount: ${this.interactionCount},session_id: ${this.sessionId},callerdetails: ${JSON.stringify(this.callerDetails)}`);
+logger.error(`Error calling GPT API  ${error.message} ${JSON.stringify(this.callerDetails)}`);
     return 'Sorry, something went wrong.';
   }
 }

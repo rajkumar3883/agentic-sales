@@ -1,84 +1,109 @@
-require('colors');
-const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
-const { Buffer } = require('node:buffer');
-const EventEmitter = require('events');
-
+require("colors");
+const { createClient, LiveTranscriptionEvents } = require("@deepgram/sdk");
+const { Buffer } = require("node:buffer");
+const EventEmitter = require("events");
 
 class TranscriptionService extends EventEmitter {
   constructor() {
     super();
-    const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
-    this.dgConnection = deepgram.listen.live({
-      encoding: 'mulaw',
-      sample_rate: '8000',
-      language: 'multi',
-      model: 'nova-3',
+    this.deepgramClient = createClient(process.env.DEEPGRAM_API_KEY);
+    this.keepAlive;
+
+    // Establish live transcription connection
+    this.dgConnection = this.setupDeepgram();
+  }
+  setupDeepgram() {
+    const deepgram = this.deepgramClient.listen.live({
+      encoding: "mulaw",
+      sample_rate: 8000,
+      language: "multi", // Or specify a single language like 'en' if needed
+      model: "nova-3",
       punctuate: true,
       interim_results: true,
       endpointing: 200,
-      utterance_end_ms: 1000
+      utterance_end_ms: 1000,
     });
 
-    this.finalResult = '';
-    this.speechFinal = true; // used to determine if we have seen speech_final=true indicating that deepgram detected a natural pause in the speakers speech. 
+    // Keep connection alive by sending periodic keep-alive messages
+    if (this.keepAlive) clearInterval(this.keepAlive);
+    this.keepAlive = setInterval(() => {
+      console.log("deepgram: keepalive...");
+      deepgram.keepAlive();
+    }, 10 * 1000); // send every 10 seconds
 
-    this.dgConnection.on(LiveTranscriptionEvents.Open, () => {
-      this.dgConnection.on(LiveTranscriptionEvents.Transcript, (transcriptionEvent) => {
-        const alternatives = transcriptionEvent.channel?.alternatives;
-        let text = '';
-        if (alternatives) {
-          text = alternatives[0]?.transcript;
-        }
-        
-        // if we receive an UtteranceEnd and speech_final has not already happened then we should consider this the end of of the human speech and emit the transcription
-        if (transcriptionEvent.type === 'UtteranceEnd') {
-          if (!this.speechFinal) {
-            console.log(`UtteranceEnd received before speechFinal, emit the text collected so far: ${this.finalResult}`.yellow);
-            this.emit('transcription', this.finalResult);
-            return;
-          } else {
-            console.log('STT -> Speech was already final when UtteranceEnd recevied'.yellow);
-            return;
+    deepgram.addListener(LiveTranscriptionEvents.Open, () => {
+      console.log("deepgram: connected");
+
+      deepgram.addListener(LiveTranscriptionEvents.Transcript, (data) => {
+        console.log("deepgram: transcript received");
+
+        let parsedData;
+
+        if (typeof data === "string") {
+          try {
+            parsedData = JSON.parse(data);
+          } catch (err) {
+            console.error("Failed to parse transcription data:", err);
+            return; // Stop if parsing fails
           }
-        }
-    
-        // console.log(text, "is_final: ", transcription?.is_final, "speech_final: ", transcription.speech_final);
-        // if is_final that means that this chunk of the transcription is accurate and we need to add it to the finalResult 
-        if (transcriptionEvent.is_final === true && text.trim().length > 0) {
-          this.finalResult += ` ${text}`;
-          // if speech_final and is_final that means this text is accurate and it's a natural pause in the speakers speech. We need to send this to the assistant for processing
-          if (transcriptionEvent.speech_final === true) {
-            this.speechFinal = true; // this will prevent a utterance end which shows up after speechFinal from sending another response
-            this.emit('transcription', this.finalResult);
-            this.finalResult = '';
-          } else {
-            // if we receive a message without speechFinal reset speechFinal to false, this will allow any subsequent utteranceEnd messages to properly indicate the end of a message
-            this.speechFinal = false;
-          }
+        } else if (typeof data === "object") {
+          parsedData = data;
         } else {
-          this.emit('utterance', text);
+          console.error("Unexpected data type from Deepgram:", typeof data);
+          return;
         }
+
+        try {
+          const alternatives = parsedData.channel?.alternatives || [];
+          const transcriptText = alternatives[0]?.transcript || "";
+
+          if (transcriptText.trim().length === 0) return;
+
+          console.log("Transcription text:", transcriptText);
+
+          // Format data to match what app.js expects
+          const formattedData = {
+            text: transcriptText,
+            isFinal: parsedData.is_final === true,
+            speechFinal:
+              parsedData.speech_final === true ||
+              parsedData.utterance_end === true,
+            utteranceEnd: parsedData.utterance_end === true,
+          };
+
+          this.emit("transcription", formattedData); // Emit the formatted data
+        } catch (err) {
+          console.error("Error accessing transcript:", err);
+        }
+
+        console.log("ws: transcript sent to client");
       });
 
-      this.dgConnection.on(LiveTranscriptionEvents.Error, (error) => {
-        console.error('STT -> deepgram error');
+      deepgram.addListener(LiveTranscriptionEvents.Close, () => {
+        console.log("deepgram: disconnected");
+        clearInterval(this.keepAlive);
+        deepgram.finish();
+      });
+
+      deepgram.addListener(LiveTranscriptionEvents.Error, (error) => {
+        console.log("deepgram: error received");
         console.error(error);
       });
 
-      this.dgConnection.on(LiveTranscriptionEvents.Warning, (warning) => {
-        console.error('STT -> deepgram warning');
-        console.error(warning);
+      deepgram.addListener(LiveTranscriptionEvents.Warning, (warning) => {
+        console.log("deepgram: warning received");
+        console.warn(warning);
       });
 
-      this.dgConnection.on(LiveTranscriptionEvents.Metadata, (metadata) => {
-        console.error('STT -> deepgram metadata');
-        console.error(metadata);
-      });
-
-      this.dgConnection.on(LiveTranscriptionEvents.Close, () => {
-        console.log('STT -> Deepgram connection closed'.yellow);
+      deepgram.addListener(LiveTranscriptionEvents.Metadata, (data) => {
+        console.log("deepgram: metadata received");
+        console.log("ws: metadata sent to client");
+        console.log("ws: metadata Metadata to client..", data);
+        this.emit("metadata", data); // Emit metadata to your application
       });
     });
+
+    return deepgram;
   }
 
   /**
@@ -87,7 +112,17 @@ class TranscriptionService extends EventEmitter {
    */
   send(payload) {
     if (this.dgConnection.getReadyState() === 1) {
-      this.dgConnection.send(Buffer.from(payload, 'base64'));
+      this.dgConnection.send(Buffer.from(payload, "base64"));
+    }
+  }
+
+  /**
+   * Close the connection and cleanup
+   */
+  close() {
+    if (this.dgConnection) {
+      this.dgConnection.finish();
+      clearInterval(this.keepAlive);
     }
   }
 }

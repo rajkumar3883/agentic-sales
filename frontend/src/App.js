@@ -13,6 +13,7 @@ import PromptForm from './pages/PromptForm';
 import PromptView from './pages/PromptView';
 import Navbar from './components/Navbar';
 
+
 // Replace with your Supabase credentials
 const supabaseUrl = 'https://druepzwuqtqxnibsfbno.supabase.co';
 const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRydWVwend1cXRxeG5pYnNmYm5vIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDU0MjY1NDEsImV4cCI6MjA2MTAwMjU0MX0.zkA0k-RcZvJwWmllU-iVIgXjSqqMkeKlecNJFKnyeAE';
@@ -31,7 +32,7 @@ const ProtectedRoute = ({ children }) => {
 function App() {
   return (
     <AuthProvider>
-      <Router>
+      <Router basename="/crm">
         <div className="App">
           <Routes>
             <Route path="/login" element={<Login />} />
