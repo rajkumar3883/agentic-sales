@@ -12,18 +12,18 @@ from google import genai
 from google.genai import types
 import time
 from openai import OpenAI
-os.environ["OPENAI_API_KEY"] = "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"
+os.environ["OPENAI_API_KEY"] = ""
 
 
 USE_OPENAI = True
 
-# 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
+# 
 
 if USE_OPENAI:
     from langchain.chat_models import ChatOpenAI
     # llm = ChatOpenAI(temperature=0.7, model="o4-mini-2025-04-16")
     llm = OpenAI()
-    google_client = genai.Client(api_key="AIzaSyCXOPehC3B6MtRsAnHp2HFBsxHTfww1MXw")
+    google_client = genai.Client(api_key="")
 else:
 
     # Load a small, locally hosted model (e.g., TinyLlama or similar)

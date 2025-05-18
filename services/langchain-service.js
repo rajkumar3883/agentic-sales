@@ -29,7 +29,7 @@ class LangchainService extends EventEmitter {
     // Initialize OpenAI client - use process.env.OPENAI_API_KEY directly
     try {
       this.openaiClient = new OpenAI({
-        apiKey: openaiApiKey || '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'
+        apiKey: openaiApiKey
       });
       logger.info('[LangchainService] OpenAI client initialized successfully');
     } catch (error) {
