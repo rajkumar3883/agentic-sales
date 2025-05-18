@@ -6,7 +6,8 @@ const logger = createLogger({
   format: format.json(),
   transports: [
     new transports.File({
-      filename: "/var/log/serverlog/app.log",
+      filename:
+        "/Users/rajverma/Downloads/github/remote/agentic-sales/serverlog/app.log",
     }),
   ],
 });

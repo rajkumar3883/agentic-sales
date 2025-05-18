@@ -15,7 +15,9 @@
   "license": "MIT",
   "dependencies": {
     "@deepgram/sdk": "^3.3.4",
+    "@google/generative-ai": "^0.2.1",
     "@langchain/openai": "^0.5.6",
+    "@supabase/supabase-js": "^2.49.4",
     "colors": "^1.4.0",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",

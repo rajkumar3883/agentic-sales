@@ -7,6 +7,7 @@ const { StreamService } = require("./services/stream-service");
 const { TranscriptionService } = require("./services/transcription-service");
 const { ElevenLabsTTSService } = require("./services/tts-service");
 const { ExternalGptService } = require("./services/external-gpt-service");
+const { LangchainService } = require("./services/langchain-service");
 const { recordingService } = require("./services/recording-service");
 const { makeOutBoundCall } = require("./scripts/outbound-call.js");
 const VoiceResponse = require("twilio").twiml.VoiceResponse;
@@ -22,6 +23,11 @@ const adminRoutes = require("./routes/admin");
 const bodyParser = require("body-parser");
 const app = express();
 ExpressWs(app);
+
+// Default LLM service configuration
+const DEFAULT_LLM_SERVICE = process.env.DEFAULT_LLM_SERVICE || 'external-gpt'; // Options: 'external-gpt', 'langchain'
+const DEFAULT_LLM_MODEL = process.env.DEFAULT_LLM_MODEL || 'gpt4'; // Options: 'gpt4', 'gemini' (for langchain)
+
 //
 app.use(cors());
 app.use(bodyParser.json());
@@ -368,6 +374,7 @@ app.ws("/connection", (ws, req) => {
     const streamService = new StreamService(ws);
     const transcriptionService = new TranscriptionService();
     const gptService = new ExternalGptService();
+    const langchainService = new LangchainService();
     const ttsService = new ElevenLabsTTSService(streamService);
 
     // Store services in session
@@ -375,6 +382,7 @@ app.ws("/connection", (ws, req) => {
       streamService,
       transcriptionService,
       gptService,
+      langchainService,
       ttsService,
     };
     let callSid = null;
@@ -405,7 +413,11 @@ app.ws("/connection", (ws, req) => {
           );
 
           streamService.setStreamSid(session.streamSid);
+          
+          // Register session for both GPT services
           gptService.registerSession(session.callSid, callerDetails);
+          langchainService.registerSession(session.callSid, callerDetails);
+          
           // Add this line to start recording here
           await recordingService(ttsService, session.callSid);
           session.timers.roundTrip.reset();
@@ -503,7 +515,10 @@ app.ws("/connection", (ws, req) => {
             `Processing final transcription: "${session.transcriptionBuffer}"`
               .green
           );
-
+          
+          // Detailed logging for transcription
+          console.log(`[APP] COMPLETE TRANSCRIPTION:\n${session.transcriptionBuffer}`);
+          
           session.timers.roundTrip.reset();
           const transcriptionTime = session.timers.transcription.elapsed();
           logger.info(
@@ -516,9 +531,75 @@ app.ws("/connection", (ws, req) => {
             interactionCount: session.metrics.rounds.length + 1,
             gptTime: 0,
             ttsTime: 0,
+            startTime: Date.now(),
           };
-          session.timers.gpt.reset(); //
-          await gptService.completion(session.transcriptionBuffer);
+          
+          session.timers.gpt.reset();
+          
+          // Determine which LLM service to use based on priority:
+          // 1. Caller details override if present
+          // 2. Environment variable default if set
+          
+          let useLangchain = false;
+          let aiModel = DEFAULT_LLM_MODEL;
+          
+          // Check caller details first - these take highest priority
+          if (session.callerDetails && session.callerDetails.aiModel) {
+            aiModel = session.callerDetails.aiModel;
+            logger.info(`[DEBUG] Caller has specified aiModel: ${aiModel}`);
+            
+            // If caller explicitly requested langchain-compatible model
+            if (aiModel === 'gpt4' || aiModel === 'gemini') {
+              useLangchain = true;
+              logger.info(`[DEBUG] Using LangchainService based on caller aiModel: ${aiModel}`);
+            } else {
+              logger.info(`[DEBUG] aiModel ${aiModel} not recognized for LangchainService, using ExternalGptService`);
+            }
+          } 
+          // If no model specified in caller details, use the default service
+          else if (DEFAULT_LLM_SERVICE === 'langchain') {
+            useLangchain = true;
+            // Use the default model from environment
+            aiModel = DEFAULT_LLM_MODEL;
+            logger.info(`[DEBUG] Using LangchainService based on DEFAULT_LLM_SERVICE with model: ${aiModel}`);
+          } else {
+            logger.info(`[DEBUG] Using ExternalGptService based on DEFAULT_LLM_SERVICE: ${DEFAULT_LLM_SERVICE}`);
+          }
+          
+          // Use the appropriate service based on determination
+          if (useLangchain) {
+            logger.info(`Using LangchainService with model: ${aiModel}`);
+            
+            try {
+              console.log(`[APP] Sending to LangchainService (${aiModel}):\n${session.transcriptionBuffer}`);
+              
+              const result = await langchainService.runLangchainPipeline(
+                session.transcriptionBuffer, 
+                session.callSid, 
+                null,
+                aiModel,
+                session.currentRound.interactionCount
+              );
+              
+              // Store response timing - TTS will be handled by the event listener
+              session.currentRound.gptTime = result.executionTime;
+              logger.info(
+                `[TIMING][Call: ${session.callSid}] LangchainService (${aiModel}) processing time: ${result.executionTime}ms`
+              );
+              
+              // Note: We don't call TTS directly here anymore - it's handled by the event listener
+            } catch (error) {
+              logger.error(`LangchainService error: ${error.message}. Falling back to ExternalGptService.`);
+              // Fall back to ExternalGptService
+              await gptService.completion(session.transcriptionBuffer);
+            }
+          } else {
+            logger.info('Using ExternalGptService');
+            // Use the external GPT service
+            await gptService.completion(session.transcriptionBuffer);
+            // Note: TTS generation is handled by the gptService.on('gptreply') event listener
+          }
+          
           session.transcriptionBuffer = "";
         }
       }
@@ -528,6 +609,30 @@ app.ws("/connection", (ws, req) => {
       console.error(`Deepgram connection failed for call ${session.callSid}`);
     });
 
+    // Add gptreply event handler for LangchainService
+    langchainService.on("gptreply", async (gptReply, interactionCount) => {
+      if (!session.active) return;
+      
+      logger.info(
+        `[DEBUG] LangchainService emitted gptreply event with content: "${gptReply.partialResponse.substring(0, 30)}..."`
+      );
+      
+      // Log full chunk content to console
+      console.log(`[APP] LANGCHAIN CHUNK (interactionCount=${interactionCount}):\n${gptReply.partialResponse}`);
+      
+      // Note: We don't update gptTime here as it's already calculated in the pipeline
+      // and passed back in the result object
+      
+      logger.info(
+        `[TIMING] LangchainService response chunk received. Processing for TTS.`
+      );
+      
+      // Generate TTS for this chunk
+      session.timers.tts.reset();
+      await ttsService.generate(gptReply, interactionCount);
+    });
+    
+    // Existing gptService event handler
     gptService.on("gptreply", async (gptReply, interactionCount) => {
       if (!session.active) return;
 
@@ -596,8 +701,8 @@ app.ws("/connection", (ws, req) => {
       }
     );
   } catch (error) {
-    console.error("Error handling WebSocket:", error);
-    logger.error(`Error handling WebSocket: ${error}`);
+    console.error(`Error initializing services: ${error.message}`);
+    logger.error(`Error initializing services: ${error.message}`);
   }
 });
 
