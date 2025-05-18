@@ -39,7 +39,7 @@ class LangchainService extends EventEmitter {
     // Initialize Google Gemini client
     try {
       this.googleClient = new GoogleGenerativeAI(
-        googleApiKey || 'AIzaSyCXOPehC3B6MtRsAnHp2HFBsxHTfww1MXw'
+        googleApiKey
       );
       logger.info('[LangchainService] Google client initialized successfully');
     } catch (error) {

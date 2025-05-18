@@ -13,12 +13,7 @@ from google.genai import types
 import time
 from openai import OpenAI
 os.environ["OPENAI_API_KEY"] = ""
-
-
 USE_OPENAI = True
-
-# 
-
 if USE_OPENAI:
     from langchain.chat_models import ChatOpenAI
     # llm = ChatOpenAI(temperature=0.7, model="o4-mini-2025-04-16")
