@@ -224,6 +224,7 @@ app.post("/makecall", async (req, res) => {
       error: `Failed to make call: ${err.message}`,
     });
   }
+
 });
 
 // Handle incoming Twilio calls
@@ -281,6 +282,7 @@ app.post("/incoming", async (req, res) => {
   }
 });
 
+
 // WebSocket connection endpoint for Twilio Media Streams
 app.ws("/connection", (ws, req) => {
   console.log("in connection...");
@@ -314,6 +316,7 @@ app.ws("/connection", (ws, req) => {
     },
     callerDetails: {},
   };
+
 
   const logTimingMetrics = (stage, metrics) => {
     const formattedMetrics = Object.entries(metrics)
@@ -376,6 +379,7 @@ app.ws("/connection", (ws, req) => {
     const gptService = new ExternalGptService();
     const langchainService = new LangchainService();
     const ttsService = new ElevenLabsTTSService(streamService);
+
 
     // Store services in session
     session.services = {
@@ -502,6 +506,7 @@ app.ws("/connection", (ws, req) => {
 
       if (session.marks.length > 0 && data.text.trim().length > 5) {
         logger.info("User interruption detected, clearing audio stream".yellow);
+
         ws.send(
           JSON.stringify({ streamSid: session.streamSid, event: "clear" })
         );
@@ -607,6 +612,7 @@ app.ws("/connection", (ws, req) => {
 
     transcriptionService.on("connection_failed", () => {
       console.error(`Deepgram connection failed for call ${session.callSid}`);
+
     });
 
     // Add gptreply event handler for LangchainService
@@ -1019,6 +1025,7 @@ app.post("/recording-status", async (req, res) => {
   }
 });
 
+
 // Function to download the recording as a buffer
 async function downloadRecordingBuffer(recordingUrl) {
   const axios = require("axios");
@@ -1047,3 +1054,4 @@ async function downloadRecordingBuffer(recordingUrl) {
 app.listen(PORT, () => {
   logger.info(`Server running on port ${PORT}`);
 });
+
