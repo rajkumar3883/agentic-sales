@@ -7,6 +7,7 @@ const { StreamService } = require("./services/stream-service");
 const { TranscriptionService } = require("./services/transcription-service");
 const { ElevenLabsTTSService } = require("./services/tts-service");
 const { ExternalGptService } = require("./services/external-gpt-service");
+const { LangchainService } = require("./services/langchain-service");
 const { recordingService } = require("./services/recording-service");
 const { makeOutBoundCall } = require("./scripts/outbound-call.js");
 const VoiceResponse = require("twilio").twiml.VoiceResponse;
@@ -22,6 +23,11 @@ const adminRoutes = require("./routes/admin");
 const bodyParser = require("body-parser");
 const app = express();
 ExpressWs(app);
+
+// Default LLM service configuration
+const DEFAULT_LLM_SERVICE = process.env.DEFAULT_LLM_SERVICE || 'external-gpt'; // Options: 'external-gpt', 'langchain'
+const DEFAULT_LLM_MODEL = process.env.DEFAULT_LLM_MODEL || 'gpt4'; // Options: 'gpt4', 'gemini' (for langchain)
+
 //
 app.use(cors());
 app.use(bodyParser.json());
@@ -309,6 +315,8 @@ app.ws("/connection", (ws, req) => {
       endTime: null,
     },
     callerDetails: {},
+    wasInterrupted: false,
+    interruptionTimer: null,
   };
 
 
@@ -371,6 +379,7 @@ app.ws("/connection", (ws, req) => {
     const streamService = new StreamService(ws);
     const transcriptionService = new TranscriptionService();
     const gptService = new ExternalGptService();
+    const langchainService = new LangchainService();
     const ttsService = new ElevenLabsTTSService(streamService);
 
 
@@ -379,6 +388,7 @@ app.ws("/connection", (ws, req) => {
       streamService,
       transcriptionService,
       gptService,
+      langchainService,
       ttsService,
     };
     let callSid = null;
@@ -409,7 +419,11 @@ app.ws("/connection", (ws, req) => {
           );
 
           streamService.setStreamSid(session.streamSid);
+          
+          // Register session for both GPT services
           gptService.registerSession(session.callSid, callerDetails);
+          langchainService.registerSession(session.callSid, callerDetails);
+          
           // Add this line to start recording here
           await recordingService(ttsService, session.callSid);
           session.timers.roundTrip.reset();
@@ -455,6 +469,16 @@ app.ws("/connection", (ws, req) => {
       cleanupSession(session);
     });
 
+    // Add handler for the new disconnection event from TranscriptionService
+    transcriptionService.on("connection_closed", () => {
+      logger.info(`Deepgram connection closed for call: ${session.callSid}`);
+      // Don't call cleanup again if session is already inactive
+      if (session.active) {
+        logger.info(`Initiating cleanup due to Deepgram disconnection for call: ${session.callSid}`);
+        cleanupSession(session);
+      }
+    });
+
     transcriptionService.on("transcription", async (data) => {
       if (!session.active) return;
 
@@ -492,23 +516,126 @@ app.ws("/connection", (ws, req) => {
 
       logger.info(`Transcription chunk: "${data.text}"`.yellow);
 
-      if (session.marks.length > 0 && data.text.trim().length > 5) {
-        logger.info("User interruption detected, clearing audio stream".yellow);
-
-        ws.send(
-          JSON.stringify({ streamSid: session.streamSid, event: "clear" })
-        );
+      // Enhanced interruption detection - check if system is currently speaking
+      const isPlaying = session.services.streamService && session.services.streamService.isPlaying();
+      const hasMarks = session.marks && session.marks.length > 0;
+      const isSignificantSpeech = data.text.trim().length >= 3;
+      
+      // Log the interruption status factors for debugging
+      logger.info(`[INTERRUPT-DEBUG] isPlaying: ${isPlaying}, hasMarks: ${hasMarks}, marks: ${JSON.stringify(session.marks)}, speechLen: ${data.text.trim().length}`);
+      
+      // Combined check for interruption - either playing audio or has marks
+      const isUserInterruption = (isPlaying || hasMarks) && isSignificantSpeech;
+      
+      if (isUserInterruption) {
+        // User is interrupting the AI, clear current audio
+        logger.info("🚨 USER INTERRUPTION DETECTED 🚨".red);
+        console.log(`[INTERRUPTION] User interrupted with: "${data.text}", hasMarks: ${hasMarks}, isPlaying: ${isPlaying}`);
+        
+        // Force stop any audio playback
+        if (session.services.streamService) {
+          const clearResult = session.services.streamService.clearAudio();
+          logger.info(`[INTERRUPT] Clear audio result: ${clearResult}`);
+        }
+        
+        // Also try direct websocket method as backup
+        try {
+          ws.send(JSON.stringify({ 
+            streamSid: session.streamSid, 
+            event: "clear" 
+          }));
+          logger.info(`[INTERRUPT] Sent direct clear command`);
+        } catch (error) {
+          logger.error(`[INTERRUPT] Error sending clear command: ${error.message}`);
+        }
+        
+        // Set a flag to indicate interruption happened
+        session.wasInterrupted = true;
+        
+        // Force handle this as a final utterance if it's significant
+        if (data.text.trim().length > 5 && !data.isFinal) {
+          logger.info(`[INTERRUPT] Force handling as final utterance: "${data.text}"`);
+          
+          // Add to buffer
+          session.transcriptionBuffer += ` ${data.text.trim()}`;
+          
+          // Mark the buffer for interruption context
+          session.transcriptionBuffer = `[User interrupted previous response] ${session.transcriptionBuffer.trim()}`;
+          
+          // Log the final buffer
+          logger.info(`[INTERRUPT] Final buffer: "${session.transcriptionBuffer}"`);
+          
+          // Process immediately - don't wait for speechFinal
+          console.log(`[APP] PROCESSING INTERRUPTION: ${session.transcriptionBuffer}`);
+          
+          // Reset timers
+          session.timers.roundTrip.reset();
+          const transcriptionTime = session.timers.transcription.elapsed();
+          
+          // Create a new round
+          session.currentRound = {
+            input: session.transcriptionBuffer,
+            transcriptionTime: transcriptionTime,
+            interactionCount: session.metrics.rounds.length + 1,
+            gptTime: 0,
+            ttsTime: 0,
+            startTime: Date.now(),
+          };
+          
+          // Reset GPT timer
+          session.timers.gpt.reset();
+          
+          // Process with appropriate service (same logic as normal processing)
+          // Just add the interruption flag more prominently
+          try {
+            console.log(`[APP] IMMEDIATE RESPONSE TO INTERRUPTION`);
+            
+            // Use langchain service if enabled
+            if (session.callerDetails && session.callerDetails.aiModel === 'gpt4') {
+              const result = await langchainService.runLangchainPipeline(
+                session.transcriptionBuffer,
+                session.callSid,
+                null,
+                'gpt4',
+                session.currentRound.interactionCount
+              );
+            } else {
+              // Fallback to external service
+              await gptService.completion(session.transcriptionBuffer);
+            }
+            
+            // Clear the buffer after processing
+            session.transcriptionBuffer = "";
+          } catch (error) {
+            logger.error(`[INTERRUPT] Error processing: ${error.message}`);
+          }
+          
+          return; // Don't process further
+        }
+        
+        // Add notification to marks for tracking
+        session.marks.push("user_interruption");
       }
 
       if (data.isFinal) {
         session.transcriptionBuffer += ` ${data.text}`;
 
         if (data.speechFinal) {
+          // If this was an interruption, add info to the buffer for context
+          if (session.wasInterrupted) {
+            logger.info("Processing interrupted transcription");
+            session.transcriptionBuffer = `[User interrupted previous response] ${session.transcriptionBuffer.trim()}`;
+            session.wasInterrupted = false;
+          }
+          
           logger.info(
             `Processing final transcription: "${session.transcriptionBuffer}"`
               .green
           );
-
+          
+          // Detailed logging for transcription
+          console.log(`[APP] COMPLETE TRANSCRIPTION:\n${session.transcriptionBuffer}`);
+          
           session.timers.roundTrip.reset();
           const transcriptionTime = session.timers.transcription.elapsed();
           logger.info(
@@ -521,9 +648,75 @@ app.ws("/connection", (ws, req) => {
             interactionCount: session.metrics.rounds.length + 1,
             gptTime: 0,
             ttsTime: 0,
+            startTime: Date.now(),
           };
-          session.timers.gpt.reset(); //
-          await gptService.completion(session.transcriptionBuffer);
+          
+          session.timers.gpt.reset();
+          
+          // Determine which LLM service to use based on priority:
+          // 1. Caller details override if present
+          // 2. Environment variable default if set
+          
+          let useLangchain = false;
+          let aiModel = DEFAULT_LLM_MODEL;
+          
+          // Check caller details first - these take highest priority
+          if (session.callerDetails && session.callerDetails.aiModel) {
+            aiModel = session.callerDetails.aiModel;
+            logger.info(`[DEBUG] Caller has specified aiModel: ${aiModel}`);
+            
+            // If caller explicitly requested langchain-compatible model
+            if (aiModel === 'gpt4' || aiModel === 'gemini') {
+              useLangchain = true;
+              logger.info(`[DEBUG] Using LangchainService based on caller aiModel: ${aiModel}`);
+            } else {
+              logger.info(`[DEBUG] aiModel ${aiModel} not recognized for LangchainService, using ExternalGptService`);
+            }
+          } 
+          // If no model specified in caller details, use the default service
+          else if (DEFAULT_LLM_SERVICE === 'langchain') {
+            useLangchain = true;
+            // Use the default model from environment
+            aiModel = DEFAULT_LLM_MODEL;
+            logger.info(`[DEBUG] Using LangchainService based on DEFAULT_LLM_SERVICE with model: ${aiModel}`);
+          } else {
+            logger.info(`[DEBUG] Using ExternalGptService based on DEFAULT_LLM_SERVICE: ${DEFAULT_LLM_SERVICE}`);
+          }
+          
+          // Use the appropriate service based on determination
+          if (useLangchain) {
+            logger.info(`Using LangchainService with model: ${aiModel}`);
+            
+            try {
+              console.log(`[APP] Sending to LangchainService (${aiModel}):\n${session.transcriptionBuffer}`);
+              
+              const result = await langchainService.runLangchainPipeline(
+                session.transcriptionBuffer, 
+                session.callSid, 
+                null,
+                aiModel,
+                session.currentRound.interactionCount
+              );
+              
+              // Store response timing - TTS will be handled by the event listener
+              session.currentRound.gptTime = result.executionTime;
+              logger.info(
+                `[TIMING][Call: ${session.callSid}] LangchainService (${aiModel}) processing time: ${result.executionTime}ms`
+              );
+              
+              // Note: We don't call TTS directly here anymore - it's handled by the event listener
+            } catch (error) {
+              logger.error(`LangchainService error: ${error.message}. Falling back to ExternalGptService.`);
+              // Fall back to ExternalGptService
+              await gptService.completion(session.transcriptionBuffer);
+            }
+          } else {
+            logger.info('Using ExternalGptService');
+            // Use the external GPT service
+            await gptService.completion(session.transcriptionBuffer);
+            // Note: TTS generation is handled by the gptService.on('gptreply') event listener
+          }
+          
           session.transcriptionBuffer = "";
         }
       }
@@ -534,6 +727,30 @@ app.ws("/connection", (ws, req) => {
 
     });
 
+    // Add gptreply event handler for LangchainService
+    langchainService.on("gptreply", async (gptReply, interactionCount) => {
+      if (!session.active) return;
+      
+      logger.info(
+        `[DEBUG] LangchainService emitted gptreply event with content: "${gptReply.partialResponse.substring(0, 30)}..."`
+      );
+      
+      // Log full chunk content to console
+      console.log(`[APP] LANGCHAIN CHUNK (interactionCount=${interactionCount}):\n${gptReply.partialResponse}`);
+      
+      // Note: We don't update gptTime here as it's already calculated in the pipeline
+      // and passed back in the result object
+      
+      logger.info(
+        `[TIMING] LangchainService response chunk received. Processing for TTS.`
+      );
+      
+      // Generate TTS for this chunk
+      session.timers.tts.reset();
+      await ttsService.generate(gptReply, interactionCount);
+    });
+    
+    // Existing gptService event handler
     gptService.on("gptreply", async (gptReply, interactionCount) => {
       if (!session.active) return;
 
@@ -602,8 +819,8 @@ app.ws("/connection", (ws, req) => {
       }
     );
   } catch (error) {
-    console.error("Error handling WebSocket:", error);
-    logger.error(`Error handling WebSocket: ${error}`);
+    console.error(`Error initializing services: ${error.message}`);
+    logger.error(`Error initializing services: ${error.message}`);
   }
 });
 
@@ -665,8 +882,36 @@ function cleanupSession(session) {
     setKey(summaryKey, JSON.stringify(summary), 604800); // Store for 7 days
   }
 
+  // Clean up resources
+  if (session.interruptionTimer) {
+    clearTimeout(session.interruptionTimer);
+    session.interruptionTimer = null;
+  }
+  
+  // Clean up services
+  if (session.services) {
+    // Clean up StreamService (stop debugging interval)
+    if (session.services.streamService && typeof session.services.streamService.cleanup === 'function') {
+      try {
+        session.services.streamService.cleanup();
+      } catch (error) {
+        logger.error(`Error cleaning up StreamService: ${error.message}`);
+      }
+    }
+    
+    // Close transcription service if it exists
+    if (session.services.transcriptionService && typeof session.services.transcriptionService.close === 'function') {
+      try {
+        session.services.transcriptionService.close();
+      } catch (error) {
+        logger.error(`Error closing transcription service: ${error.message}`);
+      }
+    }
+  }
+
   session.active = false;
   activeSessions.delete(session.callSid);
+  logger.info(`Session cleaned up for call ${session.callSid}`);
 }
 //
 // 1. Get metrics for a specific call

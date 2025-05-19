@@ -289,3 +289,87 @@ Import your secrets from your .env file to your deployed app:
 ```bash
 fly secrets import < .env
 ```
+
+## Using LangchainService for LLM Integration
+
+The app now includes a `LangchainService` that supports multiple LLM providers:
+
+### Supported Models
+
+1. **OpenAI GPT-4** - Used when `aiModel` is set to `gpt4`
+2. **Google Gemini** - Used when `aiModel` is set to `gemini`
+
+### Configuration
+
+To use the LangchainService, add the following environment variables:
+
+```
+# OpenAI API
+OPENAI_API_KEY=sk-your-openai-api-key
+
+# Google Generative AI
+GOOGLE_API_KEY=your-google-api-key
+```
+
+### CallerDetails Configuration
+
+The LangchainService is activated by setting the `aiModel` property in the callerDetails:
+
+```json
+{
+  "callId": "unique-id",
+  "phoneNumber": "+1234567890",
+  "leadName": "John Doe",
+  "leadId": "unique-lead-id", 
+  "aiModel": "gpt4",  // Use "gpt4" or "gemini"
+  "ttsService": "eleven-labs",
+  "promptId": "your-prompt-id",
+  "policyId": "your-policy-id"
+}
+```
+
+### Conversation History
+
+The service maintains conversation history per session/call, stored in JSON files within the `chat_histories` directory. This allows for continuous conversations with context across multiple interactions.
+
+### Switching Between LLM Services
+
+You can configure which LLM service to use as the default by setting these environment variables:
+
+```
+# Default LLM service - options: 'external-gpt' or 'langchain'
+DEFAULT_LLM_SERVICE=langchain
+
+# Default LLM model for langchain service - options: 'gpt4' or 'gemini'
+DEFAULT_LLM_MODEL=gpt4
+```
+
+These settings determine which service is used when no specific model is provided in the caller details. The service selection priority is:
+
+1. Caller details override (if a model is specified in the caller details)
+2. Environment variable default (if no model is specified in caller details)
+
+**Note:** When `DEFAULT_LLM_SERVICE` is set to `langchain`, the service will use the model specified in `DEFAULT_LLM_MODEL`.
+
+### Real-time Streaming with LangchainService
+
+The LangchainService implements true real-time streaming for both OpenAI and Google Gemini models, which provides these benefits:
+
+1. **Faster First Response** - Audio begins playing as soon as the first tokens are generated
+2. **Continuous Speech** - TTS chunks are sent as they arrive, creating a more natural conversation
+3. **Reduced Latency** - Total response time is reduced as processing happens in parallel
+
+The streaming implementation handles:
+- Real-time token-by-token processing from LLM APIs
+- Intelligent chunking for natural speech segments (using '•' markers when available)
+- Automatic fallback to length-based chunking when markers aren't present
+
+To optimize streaming performance, you can customize these environment variables:
+
+```
+# OpenAI model to use (defaults to gpt-4-turbo if not specified)
+OPENAI_MODEL_ID=gpt-4-turbo
+
+# Configure speech generation parameters
+ELEVENLABS_MODEL=eleven_multilingual_v2
+```

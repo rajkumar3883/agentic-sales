@@ -54,11 +54,11 @@ class ElevenLabsTTSService extends EventEmitter {
       const audioStream = await elevenlabs.textToSpeech.convertAsStream(
         process.env.ELEVENLABS_VOICE_ID,
         {
-          model_id: "eleven_multilingual_v2",
+          model_id: process.env.ELEVENLABS_MODEL,
           output_format: "ulaw_8000",
           text: partialResponse,
           voice_settings: {
-            stability: 0.3, // Lower for faster generation
+            stability: 0.2, // Lower for faster generation
             similarity_boost: 0.5, // Lower for faster generation
             use_speaker_boost: true,
           },
