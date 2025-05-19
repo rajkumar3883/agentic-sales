@@ -1,4 +1,5 @@
 const fs = require('fs').promises;
+require("dotenv").config();
 const path = require('path');
 const OpenAI = require('openai');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
@@ -10,8 +11,8 @@ class LangchainService extends EventEmitter {
     super();
     
     // Get API keys from environment with better error handling
-    const openaiApiKey = process.env.OPENAI_API_KEY;
-    const googleApiKey = process.env.GOOGLE_API_KEY;
+    const openaiApiKey = "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";
+    const googleApiKey = process.env.GOOGLE_KEY;
     
     // Log API key status (not the keys themselves)
     if (openaiApiKey) {
@@ -28,22 +29,32 @@ class LangchainService extends EventEmitter {
     
     // Initialize OpenAI client - use process.env.OPENAI_API_KEY directly
     try {
-      this.openaiClient = new OpenAI({
-        apiKey: openaiApiKey || process.env.OPENAI_API_KEY
-      });
-      logger.info('[LangchainService] OpenAI client initialized successfully');
+      const apiKey = openaiApiKey;
+      if (!apiKey) {
+        logger.error('[LangchainService] Missing OpenAI API key - service will not function correctly');
+        this.openaiClient = new OpenAI({ apiKey: 'missing-key' }); // Create client to avoid null errors
+      } else {
+        this.openaiClient = new OpenAI({ apiKey });
+        logger.info('[LangchainService] OpenAI client initialized successfully');
+      }
     } catch (error) {
       logger.error(`[LangchainService] Error initializing OpenAI client: ${error.message}`);
+      this.openaiClient = new OpenAI({ apiKey: 'invalid-key' }); // Create client to avoid null errors
     }
     
     // Initialize Google Gemini client
     try {
-      this.googleClient = new GoogleGenerativeAI(
-        googleApiKey || process.env.GOOGLE_API_KEY
-      );
-      logger.info('[LangchainService] Google client initialized successfully');
+      const apiKey = googleApiKey || process.env.GOOGLE_KEY;
+      if (!apiKey) {
+        logger.error('[LangchainService] Missing Google API key - Gemini service will not function correctly');
+        this.googleClient = new GoogleGenerativeAI('missing-key'); // Create client to avoid null errors
+      } else {
+        this.googleClient = new GoogleGenerativeAI(apiKey);
+        logger.info('[LangchainService] Google client initialized successfully');
+      }
     } catch (error) {
       logger.error(`[LangchainService] Error initializing Google client: ${error.message}`);
+      this.googleClient = new GoogleGenerativeAI('invalid-key'); // Create client to avoid null errors
     }
 
     // Memory management
@@ -179,6 +190,17 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
 
   async runLangchainPipeline(userInput, sessionId, systemPromptOverride = null, aiModel = 'gpt4', interactionCount = 0) {
     try {
+      // Check for interruption context
+      const isInterruption = userInput.includes('[User interrupted previous response]');
+      
+      if (isInterruption) {
+        logger.info(`[INTERRUPTION] Detected user interruption in session ${sessionId}`);
+        console.log(`[INTERRUPTION-LLM] Processing interruption: ${userInput}`);
+        
+        // Clean up the input by removing the interruption marker
+        userInput = userInput.replace('[User interrupted previous response]', '').trim();
+      }
+      
       const startTime = Date.now();
       logger.info(`[DEBUG] LangchainService starting pipeline with input: "${userInput.substring(0, 30)}..."`);
       logger.info(`[DEBUG] Using model: ${aiModel}, for session: ${sessionId}, interaction: ${interactionCount}`);
@@ -186,6 +208,20 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
 
       // Get memory and add user message
       const memory = await this.getMemory(sessionId);
+      
+      // If this was an interruption, mark it in the conversation context
+      if (isInterruption) {
+        // Add a system message noting the interruption with clearer instructions
+        memory.push({ 
+          role: 'system', 
+          content: `User has interrupted your previous message. You must:
+1. Stop your previous train of thought completely
+2. Immediately address their new question: "${userInput}"
+3. Be very concise - they want a direct answer
+4. Do not apologize or mention being interrupted`
+        });
+      }
+      
       memory.push({ role: 'user', content: userInput });
       
       // Format messages for API
@@ -196,8 +232,20 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
       
       logger.info(`[DEBUG] Chat history length: ${chatHistory.length} messages`);
 
-      // Use overridden system prompt if provided, otherwise use default
-      const systemPrompt = systemPromptOverride || this.systemPrompt;
+      // Enhance system prompt for interruptions if needed
+      let systemPrompt = systemPromptOverride || this.systemPrompt;
+      if (isInterruption) {
+        // Add interruption handling guidance to the system prompt
+        systemPrompt += `
+\nIMPORTANT INTERRUPTION HANDLING:
+• User has interrupted with: "${userInput}"
+• Immediately stop previous response and directly address this query
+• Be extra concise (1-2 sentences maximum)
+• Do not refer to being interrupted
+• Get straight to answering their question
+• Use more '•' markers (every 3-5 words) for smoother response
+`;
+      }
 
       let responseText = '';
       let streamingStarted = false;
@@ -218,6 +266,11 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
           // Use a more stable model ID
           const modelId = process.env.OPENAI_MODEL_ID || 'gpt-4-turbo';
           logger.info(`[DEBUG] Using OpenAI model: ${modelId} with streaming`);
+          
+          // Check if API key is available
+          if (!this.openaiClient.apiKey) {
+            throw new Error("Missing OpenAI API key. Please check your environment variables.");
+          }
           
           const completion = await this.openaiClient.chat.completions.create({
             model: modelId,
@@ -290,6 +343,12 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
       } 
       else if (aiModel === 'gemini') {
         const genAI = this.googleClient;
+        
+        // Check if API key is valid
+        if (!genAI || genAI._apiKey === 'missing-key' || genAI._apiKey === 'invalid-key') {
+          throw new Error("Missing or invalid Google API key. Please check your environment variables.");
+        }
+        
         const model = genAI.getGenerativeModel({
           model: "gemini-2.5-flash-preview-04-17"
         });
@@ -407,14 +466,31 @@ IMPORTANT: Add a '•' symbol every 5 to 10 words at natural pauses where your r
     } catch (error) {
       logger.error(`Error in runLangchainPipeline: ${error.message}`);
       logger.error(`[DEBUG] Stack trace: ${error.stack}`);
+      
+      // Check for specific error types and provide better error messages
+      let errorMessage = "I'm sorry, there was an error processing your request.";
+      
+      if (error.message.includes('API key')) {
+        console.log("openaiApiKey",openaiApiKey);
+        console.log("googleApiKey", googleApiKey);
+        errorMessage = "Authentication error. Please contact support with error code: API-AUTH-001.";
+        logger.error("[CRITICAL] API key error detected. Check environment variables.");
+      } else if (error.message.includes('rate limit')) {
+        errorMessage = "Service temporarily busy. Please try again in a moment.";
+        logger.error("[WARNING] Rate limit exceeded.");
+      } else if (error.code === 'ECONNREFUSED' || error.message.includes('connect')) {
+        errorMessage = "Network connectivity issue. Please try again later.";
+        logger.error("[ERROR] Network connectivity issue detected.");
+      }
+      
       // Even on error, emit a message so the user gets a response
       this.emit('gptreply', {
         partialResponseIndex: null,
-        partialResponse: "I'm sorry, there was an error processing your request.",
+        partialResponse: errorMessage,
       }, interactionCount);
       
       return {
-        response: "I'm sorry, there was an error processing your request.",
+        response: errorMessage,
         executionTime: 0,
         error: error.message
       };
