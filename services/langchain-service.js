@@ -11,7 +11,7 @@ class LangchainService extends EventEmitter {
     super();
     
     // Get API keys from environment with better error handling
-    const openaiApiKey = "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";
+    const openaiApiKey = process.env.OPENAI_API_KEY;
     const googleApiKey = process.env.GOOGLE_KEY;
     
     // Log API key status (not the keys themselves)
